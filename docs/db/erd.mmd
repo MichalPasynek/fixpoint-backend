@@ -1,0 +1,329 @@
+erDiagram
+  %% =========================
+  %% IdM / Party (identity)
+  %% =========================
+  PARTY ||--o{ PERSON : "is"
+  PARTY ||--o{ ORGANIZATION : "is"
+  PARTY }o--o{ PARTY_ROLE : "has"
+  PARTY_ROLE }o--|| ROLE_TYPE : "of type"
+  PARTY ||--o{ PARTY_CONTACT_MECHANISM : "uses"
+  PARTY_CONTACT_MECHANISM }o--|| CONTACT_MECHANISM : ""
+  CONTACT_MECHANISM ||--o| CONTACT_EMAIL : ""
+  CONTACT_MECHANISM ||--o| CONTACT_PHONE : ""
+  CONTACT_MECHANISM ||--o| CONTACT_POSTAL_ADDRESS : ""
+  PARTY ||--o{ IDENTIFIER : "has"
+  IDENTIFIER }o--|| IDENTIFIER_TYPE : "of type"
+  PARTY ||--o{ USER_ACCOUNT : "owns"
+  USER_ACCOUNT }o--o{ USER_ROLE : ""
+  USER_ROLE }o--|| AUTH_ROLE : ""
+  AUTH_ROLE }o--o{ ROLE_PERMISSION : ""
+  ROLE_PERMISSION }o--|| AUTH_PERMISSION : ""
+  PARTY ||--o{ PARTY_RELATIONSHIP : "from_party"
+  PARTY ||--o{ PARTY_RELATIONSHIP : "to_party"
+  PARTY_RELATIONSHIP }o--|| RELATIONSHIP_TYPE : "of type"
+
+  PARTY {
+    bigint party_id PK
+    int party_type_id FK
+    text display_name
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  PERSON {
+    bigint party_id PK,FK
+    text first_name
+    text last_name
+    date birth_date
+    text full_name
+  }
+  ORGANIZATION {
+    bigint party_id PK,FK
+    text legal_name
+    text trade_name
+    text tax_id
+  }
+  ROLE_TYPE {
+    int role_type_id PK
+    text code UK
+    text name
+  }
+  PARTY_ROLE {
+    bigint party_role_id PK
+    bigint party_id FK
+    int role_type_id FK
+    date valid_from
+    date valid_to
+  }
+  RELATIONSHIP_TYPE {
+    int relationship_type_id PK
+    text code UK
+    text name
+    boolean is_symmetric
+  }
+  PARTY_RELATIONSHIP {
+    bigint party_relationship_id PK
+    bigint from_party_id FK
+    bigint to_party_id FK
+    int relationship_type_id FK
+    date valid_from
+    date valid_to
+  }
+%% text kind_code PK: EMAIL, PHONE, POSTAL_ADDRESS, URL
+  CONTACT_MECHANISM {
+    bigint contact_mechanism_id PK
+    text kind_code PK
+    timestamptz created_at
+  }
+  CONTACT_EMAIL {
+    bigint contact_mechanism_id PK,FK
+    citext email_address UK
+  }
+  CONTACT_PHONE {
+    bigint contact_mechanism_id PK,FK
+    text country_code
+    text number
+    text extension
+  }
+  CONTACT_POSTAL_ADDRESS {
+    bigint contact_mechanism_id PK,FK
+    text line1
+    text line2
+    text city
+    text region
+    text postal_code
+    text country_code
+  }
+  %% text purpose:  /* PRIMARY, BILLING, ... */
+  PARTY_CONTACT_MECHANISM {
+    bigint party_contact_mechanism_id PK
+    bigint party_id FK
+    bigint contact_mechanism_id FK
+    text purpose
+    boolean is_primary
+    date valid_from
+    date valid_to
+  }
+  %% text code UK: VAT_ID, CUSTOMER_NO,
+  IDENTIFIER_TYPE {
+    int identifier_type_id PK
+    text code UK
+    text name
+  }
+  IDENTIFIER {
+    bigint identifier_id PK
+    bigint party_id FK
+    int identifier_type_id FK
+    text value
+    date valid_from
+    date valid_to
+  }
+  USER_ACCOUNT {
+    bigint user_account_id PK
+    bigint party_id FK
+    citext username UK
+    citext email_login
+    text password_hash
+    boolean is_active
+    boolean mfa_enabled
+    timestamptz created_at
+    timestamptz last_login_at
+  }
+  %% text code UK: ADMIN, USER, ...
+  AUTH_ROLE {
+    int auth_role_id PK
+    text code UK
+    text name
+  }
+  AUTH_PERMISSION {
+    int auth_permission_id PK
+    text code UK
+    text name
+  }
+  ROLE_PERMISSION {
+    int auth_role_id PK,FK
+    int auth_permission_id PK,FK
+  }
+  USER_ROLE {
+    bigint user_account_id PK,FK
+    int auth_role_id PK,FK
+    date valid_from PK
+    date valid_to
+  }
+
+  %% =========================
+  %% Subscriptions
+  %% =========================
+  SUBSCRIPTION_PLAN ||--o{ PLAN_FEATURE : "has"
+  SUBSCRIPTION_PLAN ||--o{ PLAN_PRICE : "priced by"
+  SUBSCRIPTION_PLAN ||--o{ SUBSCRIPTION : "instantiates"
+
+  SUBSCRIPTION ||--o{ SUBSCRIPTION_PARTY_ROLE : "involves"
+  SUBSCRIPTION ||--o{ SUBSCRIPTION_ITEM : "covers"
+  SUBSCRIPTION ||--o{ SUBSCRIPTION_SLA : "binds"
+  SUBSCRIPTION ||--o{ SUBSCRIPTION_ASSET_COVERAGE : "covers"
+  SUBSCRIPTION ||--o| RENEWAL_POLICY : "has"
+  SUBSCRIPTION ||--o| CANCELLATION : "may have"
+
+  SUBSCRIPTION_PARTY_ROLE }o--|| PARTY : "for party"
+
+  SUBSCRIPTION_PLAN {
+    bigint plan_id PK
+    text code UK
+    text name
+    text description
+    boolean is_active
+  }
+  %% text value_type:  INT, DECIMAL, TEXT, BOOL
+  PLAN_FEATURE {
+    bigint plan_feature_id PK
+    bigint plan_id FK
+    text code
+    text name
+    text value_type
+    text value
+  }
+  %% text billing_period: MONTH, YEAR
+  PLAN_PRICE {
+    bigint plan_price_id PK
+    bigint plan_id FK
+    text currency
+    text billing_period
+    numeric amount
+    date valid_from
+    date valid_to
+  }
+  %% text status: PENDING, ACTIVE, SUSPENDED, CANCELED, EXPIRED
+  SUBSCRIPTION {
+    bigint subscription_id PK
+    bigint plan_id FK
+    text status
+    date start_date
+    date end_date
+    boolean auto_renew
+    text external_ref
+  }
+  %% text role_code: SUBSCRIBER, BENEFICIARY, BILLING_CONTACT, ACCOUNT_OWNER
+  SUBSCRIPTION_PARTY_ROLE {
+    bigint subscription_party_role_id PK
+    bigint subscription_id FK
+    bigint party_id FK
+    text role_code
+    date valid_from
+    date valid_to
+  }
+  SUBSCRIPTION_ITEM {
+    bigint subscription_item_id PK
+    bigint subscription_id FK
+    text service_code
+    text description
+    numeric quantity
+    text unit
+  }
+  SUBSCRIPTION_SLA {
+    bigint subscription_sla_id PK
+    bigint subscription_id FK
+    text sla_code
+    int response_time_minutes
+    int resolution_time_minutes
+  }
+  SUBSCRIPTION_ASSET_COVERAGE {
+    bigint coverage_id PK
+    bigint subscription_id FK
+    bigint asset_id FK
+    date valid_from
+    date valid_to
+  }
+  RENEWAL_POLICY {
+    bigint policy_id PK
+    bigint subscription_id FK
+    int renew_window_days
+    int notice_required_days
+  }
+  CANCELLATION {
+    bigint cancellation_id PK
+    bigint subscription_id FK
+    timestamptz canceled_at
+    text reason_code
+    numeric prorated_amount
+  }
+
+  %% =========================
+  %% Service / Repairs
+  %% =========================
+  SERVICE_REQUEST ||--o{ REQUEST_PARTY_ROLE : "has parties"
+  SERVICE_REQUEST }o--o{ WORK_ORDER : "spawn"
+  SERVICE_REQUEST }o--o| SUBSCRIPTION : "may be covered by"
+  SERVICE_REQUEST }o--o| ASSET : "affects"
+
+  REQUEST_PARTY_ROLE }o--|| PARTY : "is"
+  WORK_ORDER ||--o{ WORK_ORDER_TASK : "has"
+  WORK_ORDER }o--o{ WORK_ORDER_ASSIGNMENT : "assigned to"
+  WORK_ORDER_ASSIGNMENT }o--|| PARTY : "assignee (technician)"
+  SLA_AGREEMENT ||--o{ SLA_METRIC : "defines"
+  SLA_AGREEMENT ||--o{ SLA_BREACH : "breaches"
+
+%% text status: NEW, IN_PROGRESS, ON_HOLD, RESOLVED, CLOSED
+%% text priority: LOW, MEDIUM, HIGH, CRITICAL
+  SERVICE_REQUEST {
+    bigint service_request_id PK
+    bigint subscription_id FK
+    bigint asset_id FK
+    text title
+    text description
+    text status
+    text priority
+    timestamptz created_at
+  }
+  %% text role_code: REQUESTER, CONTACT, ASSIGNEE
+  REQUEST_PARTY_ROLE {
+    bigint request_party_role_id PK
+    bigint service_request_id FK
+    bigint party_id FK
+    text role_code
+    timestamptz valid_from
+    timestamptz valid_to
+  }
+  %% text status: OPEN, SCHEDULED, IN_PROGRESS, DONE, CANCELED
+  WORK_ORDER {
+    bigint work_order_id PK
+    bigint service_request_id FK
+    text status
+    timestamptz created_at
+    timestamptz closed_at
+  }
+  WORK_ORDER_TASK {
+    bigint work_order_task_id PK
+    bigint work_order_id FK
+    text description
+    int sequence_no
+    text status
+  }
+  %% bigint party_id FK: technician (PERSON)
+  WORK_ORDER_ASSIGNMENT {
+    bigint work_order_assignment_id PK
+    bigint work_order_id FK
+    bigint party_id FK
+    timestamptz assigned_at
+  }
+  SLA_AGREEMENT {
+    bigint sla_agreement_id PK
+    text code UK
+    text name
+  }
+  %% text metric_code: RESP_TIME, RES_TIME
+  SLA_METRIC {
+    bigint sla_metric_id PK
+    bigint sla_agreement_id FK
+    text metric_code
+    int threshold_minutes
+  }
+  SLA_BREACH {
+    bigint sla_breach_id PK
+    bigint sla_agreement_id FK
+    bigint service_request_id FK
+    text metric_code
+    timestamptz occurred_at
+  }
+
+  %% Links between modules
+  SUBSCRIPTION_SLA }o--|| SLA_AGREEMENT : "applies"
