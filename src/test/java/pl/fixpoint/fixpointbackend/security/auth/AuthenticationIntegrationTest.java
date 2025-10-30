@@ -7,7 +7,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
-import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,17 +22,57 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+
 
 @SpringBootTest
 @AutoConfigureMockMvc
-@Transactional // Wycofanie zmian w bazie po każdym teście
+@Transactional
+@Testcontainers
 public class AuthenticationIntegrationTest {
+
+    @Container
+    public static PostgreSQLContainer<?> postgresContainer = new PostgreSQLContainer<>("postgres:15-alpine")
+            .withDatabaseName("fixpointdb")
+            .withUsername("fixpoint_test_user")
+            .withPassword("fixpoint_test_pass")
+            .withInitScript("sql/create_service_schema.sql");
+
+    @DynamicPropertySource
+    static void setTestProperties(DynamicPropertyRegistry registry) {
+        // 1. Parametry połączenia (z Testcontainers)
+        registry.add("spring.datasource.url", postgresContainer::getJdbcUrl);
+        registry.add("spring.datasource.username", postgresContainer::getUsername);
+        registry.add("spring.datasource.password", postgresContainer::getPassword);
+
+        // 2. KONFIGURACJA FLYWAY (WŁĄCZONA!)
+        registry.add("spring.flyway.enabled", () -> "true"); // Upewnij się, że Flyway jest włączony
+
+        // Upewnij się, że Flyway wie, gdzie szukać migracji (domyślna ścieżka to 'db/migration')
+        registry.add("spring.flyway.locations", () -> "classpath:db/migration");
+
+        // Flyway musi wiedzieć, że ma pracować na schemacie "service"
+        registry.add("spring.flyway.schemas", () -> "service");
+
+        // 3. Kontrola DDL Hibernate (możemy to zostawić w bezpiecznym trybie)
+        registry.add("spring.jpa.hibernate.ddl-auto", () -> "none"); // Flyway się tym zajmie
+
+        // Wreszcie, upewnienie się, że Hibernate też wie, że ma pracować na schemacie "service"
+        registry.add("spring.jpa.properties.hibernate.default_schema", () -> "service");
+    }
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
 
     @Autowired
     private MockMvc mockMvc;
 
     @Autowired
-    private ObjectMapper objectMapper; // Do konwersji obiektów Java na JSON
+    private ObjectMapper objectMapper;
 
     @Autowired
     private UserRepository userRepository;
@@ -47,7 +87,7 @@ public class AuthenticationIntegrationTest {
 
     @BeforeEach
     void setup() throws Exception {
-        // Zapewniamy, że role istnieją (zgodnie z V2__add_security_tables.sql)
+
         if (roleRepository.findByName(CUSTOMERS_ROLE).isEmpty()) {
             roleRepository.save(Role.builder().name(CUSTOMERS_ROLE).build());
         }
@@ -55,7 +95,6 @@ public class AuthenticationIntegrationTest {
             roleRepository.save(Role.builder().name(ADMIN_ROLE).build());
         }
 
-        // 1. ZAREJESTRUJ KLIENTA (dla testu uwierzytelniania)
         RegisterRequest registerCustomerRequest = RegisterRequest.builder()
                 .firstName("Test")
                 .lastName("Customer")
@@ -68,7 +107,6 @@ public class AuthenticationIntegrationTest {
                         .content(objectMapper.writeValueAsString(registerCustomerRequest)))
                 .andExpect(status().isOk());
 
-        // 2. LOGOWANIE KLIENTA (zdobycie tokena)
         AuthenticationRequest authCustomerRequest = AuthenticationRequest.builder()
                 .email("test.customer@test.com")
                 .password("password123")
@@ -80,20 +118,17 @@ public class AuthenticationIntegrationTest {
                 .andExpect(status().isOk())
                 .andReturn();
 
-        // Zapisanie tokena klienta
         customerToken = objectMapper.readValue(customerResult.getResponse().getContentAsString(), AuthenticationResponse.class).getToken();
 
-        // 3. RĘCZNE UTWORZENIE ADMINA (do testu autoryzacji)
         User adminUser = User.builder()
                 .firstName("Admin")
                 .lastName("User")
                 .email("test.admin@test.com")
-                .password("$2a$10$XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
+                .password(passwordEncoder.encode("password123"))
                 .roles(List.of(roleRepository.findByName(ADMIN_ROLE).get()))
                 .build();
         userRepository.save(adminUser);
 
-        // 4. LOGOWANIE ADMINA (zdobycie tokena)
         AuthenticationRequest authAdminRequest = AuthenticationRequest.builder()
                 .email("test.admin@test.com")
                 .password("password123")
@@ -107,8 +142,6 @@ public class AuthenticationIntegrationTest {
 
         adminToken = objectMapper.readValue(adminResult.getResponse().getContentAsString(), AuthenticationResponse.class).getToken();
     }
-
-    // --- TESTY UWIEŻYTELNIENIA (AUTHENTICATION) ---
 
     @Test
     void shouldReturnTokenOnValidAuthentication() throws Exception {
@@ -131,14 +164,11 @@ public class AuthenticationIntegrationTest {
                 .password("wrongpassword")
                 .build();
 
-        // Spring Security zwraca 403 Forbidden dla nieudanego uwierzytelnienia w REST API
         mockMvc.perform(post("/api/v1/auth/authenticate")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
     }
-
-    // --- TESTY AUTORYZACJI (AUTHORIZATION) ---
 
     @Test
     void shouldReturn401UnauthorizedWhenAccessingSecureEndpointWithoutToken() throws Exception {
